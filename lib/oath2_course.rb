@@ -9,6 +9,8 @@ require 'thor'
 
 module Oath2Course
   class Cli < Thor
+    SPA_CLIENT_ID = '0oa1544e81jwUDzaf5d7'
+
     CLIENT_ID = '0oa153ahp1h5UmRWP5d7'
     CLIENT_SECRET = '5Pdd_XF4QJuFeu2Ol1ZEMHFBj0EVJKfnXatMeOBw'
     AUTHORIZE_URL = 'https://dev-19441964.okta.com/oauth2/default/v1/authorize'
@@ -20,7 +22,7 @@ module Oath2Course
       pkce_code = randstr 128
 
       puts "[1] Authorize URL:"
-      puts code_url pkce_code
+      puts code_url pkce_code, CLIENT_ID
 
       print "[2] Write the authorization code: "
       auth_code = STDIN.gets.chomp
@@ -37,6 +39,21 @@ module Oath2Course
       puts JSON.pretty_generate body
     end
 
+    desc 'pkce', 'Exceutes a grant code flow with PKCE'
+    def pkce
+      pkce_code = randstr 128
+
+      puts "[1] Authorize URL:"
+      puts code_url pkce_code, SPA_CLIENT_ID
+
+      print "[2] Write the authorization code: "
+      auth_code = STDIN.gets.chomp
+
+      body = obtain_pkce_token pkce_code, auth_code
+      puts "[3] Authentication response:"
+      puts JSON.pretty_generate body
+    end
+
     no_commands do
       def randstr(size=10)
         SecureRandom.hex(size / 2)
@@ -46,17 +63,17 @@ module Oath2Course
         Base64.urlsafe_encode64(Digest::SHA256.digest value).gsub('=', '')
       end
 
-      def code_url(pkce_code, extra_scopes = [], state = randstr)
+      def code_url(pkce_code, client_id, extra_scopes = [], state = randstr)
         challenge_code = urlsafe_base64 pkce_code
 
         query_string = URI.encode_www_form(
           response_type: 'code',
-          scope: [*extra_scopes, 'offline_access', 'aleph'].join(' '),
-          client_id: CLIENT_ID,
-          state: state,
+          client_id: client_id,
           redirect_uri: REDIRECT_URI,
+          scope: [*extra_scopes, 'offline_access', 'aleph'].join(' '),
+          state: state,
           code_challenge: challenge_code,
-          code_challenge_method: 'S256'
+          code_challenge_method: 'S256',
         )
 
         "#{AUTHORIZE_URL}?#{query_string}"
@@ -74,14 +91,28 @@ module Oath2Course
         JSON.parse(response.body.to_s)
       end
 
+      def obtain_pkce_token(pkce_code, auth_code)
+        token_body = URI.encode_www_form(
+          grant_type: 'authorization_code',
+          code: auth_code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: pkce_code,
+          client_id: SPA_CLIENT_ID,
+        )
+
+        response = Faraday.post TOKEN_URL, token_body
+        JSON.parse(response.body.to_s)
+      end
+
       def obtain_token(pkce_code, auth_code)
         token_body = URI.encode_www_form(
           grant_type: 'authorization_code',
+          code: auth_code,
           redirect_uri: REDIRECT_URI,
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
           code_verifier: pkce_code,
-          code: auth_code
+          client_id: CLIENT_ID,
+          # different from PKE flow
+          client_secret: CLIENT_SECRET,
         )
 
         response = Faraday.post TOKEN_URL, token_body
