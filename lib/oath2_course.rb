@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'dotenv/load'
 require 'securerandom'
 require 'digest'
 require 'faraday'
@@ -9,24 +10,13 @@ require 'thor'
 
 module Oath2Course
   class Cli < Thor
-    SPA_CLIENT_ID = '0oa1544e81jwUDzaf5d7'
-
-    CLIENT_ID_CREDENTIAL = '0oa155f93aGyY1d2O5d7'
-    CLIENT_SECRET_CREDENTIAL = 'rq3iZoMdGDHotIDuCoznAui5DyBkKteRLa5iMxJx'
-    CLIENT_ID = '0oa153ahp1h5UmRWP5d7'
-    CLIENT_SECRET = '5Pdd_XF4QJuFeu2Ol1ZEMHFBj0EVJKfnXatMeOBw'
-
-    INTROSPECTION_URL = 'https://dev-19441964.okta.com/oauth2/default/v1/introspect'
-    AUTHORIZE_URL = 'https://dev-19441964.okta.com/oauth2/default/v1/authorize'
-    TOKEN_URL = 'https://dev-19441964.okta.com/oauth2/default/v1/token'
-    REDIRECT_URI = 'https://example-app.com/redirect'
-
     desc 'code', 'Executes a grant code flow'
+    option :profile, type: :string, required: true
     def code
       pkce_code = randstr 128
 
       puts "[1] Authorize URL:"
-      puts code_url pkce_code, CLIENT_ID
+      puts code_url pkce_code, client_id
 
       print "[2] Write the authorization code: "
       auth_code = STDIN.gets.chomp
@@ -37,6 +27,7 @@ module Oath2Course
     end
 
     desc 'refresh TOKEN', 'Executes grant refresh token flow'
+    option :profile, type: :string, required: true
     def refresh(token)
       body = obtain_token_with_refresh token
       puts "[1] Refresh Token response:"
@@ -44,11 +35,12 @@ module Oath2Course
     end
 
     desc 'pkce', 'Exceutes a grant code flow with PKCE'
+    option :profile, type: :string, required: true
     def pkce
       pkce_code = randstr 128
 
       puts "[1] Authorize URL:"
-      puts code_url pkce_code, SPA_CLIENT_ID, ['offline_access']
+      puts code_url pkce_code, client_id, custom_scopes
 
       print "[2] Write the authorization code: "
       auth_code = STDIN.gets.chomp
@@ -59,18 +51,20 @@ module Oath2Course
     end
 
     desc 'credentials', 'Execute grant client credentials flow'
+    option :profile, type: :string, required: true
     def credentials
-      body = obtain_credentials_token
+      body = obtain_credentials_token custom_scopes
       puts "[1] Authentication response:"
       puts JSON.pretty_generate body
     end
 
     desc 'openid', 'Include scopes for OpenID'
+    option :profile, type: :string, required: true
     def openid
       pkce_code = randstr 128
 
       puts "[1] Authorize URL:"
-      puts code_url pkce_code, CLIENT_ID, ['openid', 'profile', 'email']
+      puts code_url pkce_code, client_id, custom_scopes
 
       print "[2] Write the authorization code: "
       auth_code = STDIN.gets.chomp
@@ -80,16 +74,18 @@ module Oath2Course
       puts JSON.pretty_generate body
 
       puts "[4] OpenID JWT contents:"
+      # puts "[DEBUG] #{body}"
       payload = Base64.decode64 body['id_token'].split('.')[1]
       content = JSON.parse payload
       puts JSON.pretty_generate content
     end
 
     desc 'validate ACCESS_TOKEN', 'Validate and access token'
+    option :profile, type: :string, required: true
     def validate(access_token)
       query_string = URI.encode_www_form(
-        client_id: CLIENT_ID_CREDENTIAL,
-        client_secret: CLIENT_SECRET_CREDENTIAL,
+        client_id: client_id,
+        client_secret: client_secret,
         token: access_token,
       )
 
@@ -108,14 +104,14 @@ module Oath2Course
         Base64.urlsafe_encode64(Digest::SHA256.digest value).gsub('=', '')
       end
 
-      def code_url(pkce_code, client_id, extra_scopes = [], state = randstr)
+      def code_url(pkce_code, client_id, scopes = [], state = randstr)
         challenge_code = urlsafe_base64 pkce_code
 
         query_string = URI.encode_www_form(
           response_type: 'code',
           client_id: client_id,
-          redirect_uri: REDIRECT_URI,
-          scope: [*extra_scopes, 'aleph'].join(' '),
+          redirect_uri: redirect_uri,
+          scope: scopes.join(' '),
           state: state,
           code_challenge: challenge_code,
           code_challenge_method: 'S256',
@@ -127,24 +123,24 @@ module Oath2Course
       def obtain_token_with_refresh(refresh_token)
         token_body = URI.encode_www_form(
           grant_type: 'refresh_token',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
+          client_id: client_id,
+          client_secret: client_secret,
           refresh_token: refresh_token,
         )
 
-        response = Faraday.post TOKEN_URL, token_body
+        response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
       end
 
-      def obtain_credentials_token
+      def obtain_credentials_token(scopes)
         token_body = URI.encode_www_form(
           grant_type: 'client_credentials',
-          client_id: CLIENT_ID_CREDENTIAL,
-          client_secret: CLIENT_SECRET_CREDENTIAL,
-          scope: ['aleph'],
+          client_id: client_id,
+          client_secret: client_secret,
+          scope: scopes.join(' '),
         )
 
-        response = Faraday.post TOKEN_URL, token_body
+        response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
       end
 
@@ -152,12 +148,12 @@ module Oath2Course
         token_body = URI.encode_www_form(
           grant_type: 'authorization_code',
           code: auth_code,
-          redirect_uri: REDIRECT_URI,
+          redirect_uri: redirect_uri,
           code_verifier: pkce_code,
-          client_id: SPA_CLIENT_ID,
+          client_id: client_id,
         )
 
-        response = Faraday.post TOKEN_URL, token_body
+        response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
       end
 
@@ -165,15 +161,47 @@ module Oath2Course
         token_body = URI.encode_www_form(
           grant_type: 'authorization_code',
           code: auth_code,
-          redirect_uri: REDIRECT_URI,
+          redirect_uri: redirect_uri,
           code_verifier: pkce_code,
-          client_id: CLIENT_ID,
+          client_id: client_id,
           # different from PKE flow
-          client_secret: CLIENT_SECRET,
+          client_secret: client_secret,
         )
 
-        response = Faraday.post TOKEN_URL, token_body
+        response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
+      end
+
+      def client_id
+        ENV["#{options[:profile]}.client_id"]
+      end
+
+      def client_secret
+        ENV["#{options[:profile]}.client_secret"]
+      end
+
+      def base_url
+        ENV["#{options[:profile]}.base_url"]
+      end
+
+      def custom_scopes
+        ENV["#{options[:profile]}.scopes"].split(',')
+      end
+
+      def redirect_uri
+        ENV["#{options[:profile]}.callback_url"]
+      end
+
+      def introspection_url
+        "#{base_url}/introspect"
+      end
+
+      def authorize_url
+        "#{base_url}/authorize"
+      end
+
+      def token_url
+        "#{base_url}/token"
       end
     end
   end
