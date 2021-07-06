@@ -152,7 +152,6 @@ module Oath2Toolkit
           scope: scopes.join(' '),
         )
 
-        require "pry";binding.pry
         response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
       end
