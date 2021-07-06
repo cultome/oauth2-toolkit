@@ -8,7 +8,7 @@ require 'base64'
 require 'json'
 require 'thor'
 
-module Oath2Course
+module Oath2Toolkit
   class Cli < Thor
     desc 'code', 'Executes a grant code flow'
     option :profile, type: :string, required: true
@@ -24,6 +24,8 @@ module Oath2Course
       body = obtain_token pkce_code, auth_code
       puts "[3] Authentication response:"
       puts JSON.pretty_generate body
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     desc 'refresh TOKEN', 'Executes grant refresh token flow'
@@ -32,6 +34,8 @@ module Oath2Course
       body = obtain_token_with_refresh token
       puts "[1] Refresh Token response:"
       puts JSON.pretty_generate body
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     desc 'pkce', 'Exceutes a grant code flow with PKCE'
@@ -48,6 +52,8 @@ module Oath2Course
       body = obtain_pkce_token pkce_code, auth_code
       puts "[3] Authentication response:"
       puts JSON.pretty_generate body
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     desc 'credentials', 'Execute grant client credentials flow'
@@ -56,6 +62,8 @@ module Oath2Course
       body = obtain_credentials_token custom_scopes
       puts "[1] Authentication response:"
       puts JSON.pretty_generate body
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     desc 'openid', 'Include scopes for OpenID'
@@ -78,6 +86,8 @@ module Oath2Course
       payload = Base64.decode64 body['id_token'].split('.')[1]
       content = JSON.parse payload
       puts JSON.pretty_generate content
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     desc 'validate ACCESS_TOKEN', 'Validate and access token'
@@ -93,6 +103,8 @@ module Oath2Course
       response = Faraday.post INTROSPECTION_URL, query_string
       body = JSON.parse(response.body.to_s)
       puts JSON.pretty_generate body
+    rescue Exception => error
+      puts "[-] Error: #{error}"
     end
 
     no_commands do
@@ -117,7 +129,7 @@ module Oath2Course
           code_challenge_method: 'S256',
         )
 
-        "#{AUTHORIZE_URL}?#{query_string}"
+        "#{authorize_url}?#{query_string}"
       end
 
       def obtain_token_with_refresh(refresh_token)
@@ -140,6 +152,7 @@ module Oath2Course
           scope: scopes.join(' '),
         )
 
+        require "pry";binding.pry
         response = Faraday.post token_url, token_body
         JSON.parse(response.body.to_s)
       end
@@ -172,24 +185,28 @@ module Oath2Course
         JSON.parse(response.body.to_s)
       end
 
+      def profile
+        options[:profile]
+      end
+
       def client_id
-        ENV["#{options[:profile]}.client_id"]
+        retrive_key "#{profile}.client_id"
       end
 
       def client_secret
-        ENV["#{options[:profile]}.client_secret"]
+        retrive_key "#{profile}.client_secret"
       end
 
       def base_url
-        ENV["#{options[:profile]}.base_url"]
+        retrive_key "#{profile}.base_url"
       end
 
       def custom_scopes
-        ENV["#{options[:profile]}.scopes"].split(',')
+        retrive_key("#{profile}.scopes").split(',')
       end
 
       def redirect_uri
-        ENV["#{options[:profile]}.callback_url"]
+        retrive_key "#{profile}.callback_url"
       end
 
       def introspection_url
@@ -202,6 +219,14 @@ module Oath2Course
 
       def token_url
         "#{base_url}/token"
+      end
+
+      def retrive_key(name)
+        if ENV.key? name
+          ENV[name]
+        else
+          raise "Required key #{name} is missing"
+        end
       end
     end
   end

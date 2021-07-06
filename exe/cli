@@ -2,6 +2,6 @@
 
 $LOAD_PATH.unshift './lib'
 
-require 'oath2_course'
+require 'oath2_toolkit'
 
-Oath2Course::Cli.start ARGV
+Oath2Toolkit::Cli.start ARGV
